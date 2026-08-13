@@ -5,3 +5,5 @@ A real-time computer vision system that uses hand gestures to interact with and 
 ## Status
 
 🚧 Under active development.
+<!--  deactivate
+PS D:\fb trader\deep_learning\gesture_detection\gesture-control-system> .venv\Scripts\Activate.ps1 -->
