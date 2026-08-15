@@ -16,7 +16,9 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from gesture_control.actions.action import Action
+from gesture_control.gestures.finger_states import HandLandmark
 from gesture_control.gestures.recognizer import Gesture
+from gesture_control.mapping.coordinate_mapper import ScreenPoint
 from gesture_control.runtime.runtime import FrameResult, GestureControlRuntime
 from gesture_control.tracking.hand_tracking_result import (
     DetectedHand,
@@ -87,32 +89,77 @@ class FakeComputerController:
         self.executed_calls.append((action, x, y))
 
 
-def _make_landmarks(scale: float = 0.01) -> Tuple[Tuple[float, float, float], ...]:
-    return tuple((i * scale, i * scale * 2, i * scale * 3) for i in range(21))
+class FakeCoordinateMapper:
+    """Fake CoordinateMapper: returns a fixed ScreenPoint, records input.
+
+    Used so runtime tests verify *dependency injection and wiring*
+    (that the runtime calls the mapper with the right coordinates and
+    forwards its result correctly) rather than re-testing
+    `CoordinateMapper`'s own conversion math, which is already covered
+    by tests/test_coordinate_mapper.py.
+    """
+
+    def __init__(self, screen_point: ScreenPoint = ScreenPoint(123, 456)) -> None:
+        self._screen_point = screen_point
+        self.received_points: List[Tuple[float, float]] = []
+
+    def map_point(self, x: float, y: float) -> ScreenPoint:
+        self.received_points.append((x, y))
+        return self._screen_point
 
 
-def _make_hand(scale: float = 0.01, handedness: Handedness = Handedness.RIGHT) -> DetectedHand:
-    return DetectedHand(landmarks=_make_landmarks(scale), handedness=handedness)
+def _make_landmarks(
+    scale: float = 0.01,
+    index_tip: Optional[Tuple[float, float, float]] = None,
+) -> Tuple[Tuple[float, float, float], ...]:
+    landmarks = [(i * scale, i * scale * 2, i * scale * 3) for i in range(21)]
+    if index_tip is not None:
+        landmarks[HandLandmark.INDEX_TIP] = index_tip
+    return tuple(landmarks)
+
+
+def _make_hand(
+    scale: float = 0.01,
+    handedness: Handedness = Handedness.RIGHT,
+    index_tip: Optional[Tuple[float, float, float]] = None,
+) -> DetectedHand:
+    return DetectedHand(landmarks=_make_landmarks(scale, index_tip=index_tip), handedness=handedness)
 
 
 def _build_runtime(
     tracking_result: HandTrackingResult,
     gesture: Gesture = Gesture.FIST,
     action: Action = Action.LEFT_CLICK,
-) -> Tuple[GestureControlRuntime, FakeHandTracker, FakeFingerStateDetector, FakeGestureRecognizer, FakeActionMapper, FakeComputerController]:
+    coordinate_mapper: Optional[FakeCoordinateMapper] = None,
+) -> Tuple[
+    GestureControlRuntime,
+    FakeHandTracker,
+    FakeFingerStateDetector,
+    FakeGestureRecognizer,
+    FakeActionMapper,
+    FakeCoordinateMapper,
+    FakeComputerController,
+]:
+    # NOTE: `coordinate_mapper` is returned BEFORE `controller` (not
+    # after), specifically so existing `runtime, *_, controller = ...`
+    # call sites below keep binding `controller` to the actual
+    # FakeComputerController rather than silently rebinding it to the
+    # new FakeCoordinateMapper.
     tracker = FakeHandTracker(tracking_result)
     finger_state_detector = FakeFingerStateDetector()
     gesture_recognizer = FakeGestureRecognizer(gesture)
     action_mapper = FakeActionMapper(action)
     controller = FakeComputerController()
+    mapper = coordinate_mapper if coordinate_mapper is not None else FakeCoordinateMapper()
     runtime = GestureControlRuntime(
         hand_tracker=tracker,
         finger_state_detector=finger_state_detector,
         gesture_recognizer=gesture_recognizer,
         action_mapper=action_mapper,
         computer_controller=controller,
+        coordinate_mapper=mapper,
     )
-    return runtime, tracker, finger_state_detector, gesture_recognizer, action_mapper, controller
+    return runtime, tracker, finger_state_detector, gesture_recognizer, action_mapper, mapper, controller
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +168,7 @@ def _build_runtime(
 
 class TestNoHandDetected:
     def test_no_gesture_recognition_or_mapping_or_execution_occurs(self) -> None:
-        runtime, tracker, fsd, gr, am, controller = _build_runtime(HandTrackingResult())
+        runtime, tracker, fsd, gr, am, mapper, controller = _build_runtime(HandTrackingResult())
 
         result = runtime.process_frame("frame")
 
@@ -170,7 +217,8 @@ class TestOneHandDetected:
         gr = FakeGestureRecognizer(Gesture.PEACE)
         am = FakeActionMapper(Action.SCREENSHOT)
         controller = FakeComputerController()
-        runtime = GestureControlRuntime(tracker, fsd, gr, am, controller)
+        mapper = FakeCoordinateMapper()
+        runtime = GestureControlRuntime(tracker, fsd, gr, am, controller, mapper)
 
         runtime.process_frame("frame")
 
@@ -178,7 +226,7 @@ class TestOneHandDetected:
 
     def test_recognized_gesture_is_passed_to_action_mapper(self) -> None:
         hand = _make_hand()
-        runtime, _, _, gr, am, _ = _build_runtime(
+        runtime, _, _, gr, am, _, _ = _build_runtime(
             HandTrackingResult(hands=(hand,)), gesture=Gesture.PEACE, action=Action.SCREENSHOT
         )
 
@@ -242,15 +290,80 @@ class TestMultipleHandsDetected:
         assert result.tracking_result.num_hands == 2
         assert result.tracking_result.hands == (first_hand, second_hand)
 
+    def test_move_cursor_uses_first_hands_index_tip_not_second_hands(self) -> None:
+        first_hand = _make_hand(index_tip=(0.1, 0.1, 0.0), handedness=Handedness.RIGHT)
+        second_hand = _make_hand(index_tip=(0.9, 0.9, 0.0), handedness=Handedness.LEFT)
+        runtime, *_, mapper, controller = _build_runtime(
+            HandTrackingResult(hands=(first_hand, second_hand)),
+            gesture=Gesture.POINT,
+            action=Action.MOVE_CURSOR,
+        )
+
+        runtime.process_frame("frame")
+
+        assert mapper.received_points == [(0.1, 0.1)]
+
 
 # ---------------------------------------------------------------------------
-# MOVE_CURSOR: mapped but not executed, since no coordinate mapping exists
+# MOVE_CURSOR: INDEX_TIP -> CoordinateMapper -> ComputerController
 # ---------------------------------------------------------------------------
 
-class TestMoveCursorIsNotFabricated:
-    def test_move_cursor_action_is_reported_but_not_executed(self) -> None:
-        hand = _make_hand()
+class TestMoveCursorCoordinateMapping:
+    def test_point_uses_index_tip_coordinates(self) -> None:
+        # A hand whose INDEX_TIP is the only landmark with these exact,
+        # distinctive values -- every other landmark uses a different
+        # scale -- so passing this assertion proves INDEX_TIP
+        # specifically was read, not some other landmark.
+        hand = _make_hand(scale=0.01, index_tip=(0.42, 0.73, 0.05))
+        runtime, *_, mapper, controller = _build_runtime(
+            HandTrackingResult(hands=(hand,)), gesture=Gesture.POINT, action=Action.MOVE_CURSOR
+        )
+
+        runtime.process_frame("frame")
+
+        assert mapper.received_points == [(0.42, 0.73)]
+
+    def test_normalized_index_tip_coordinates_are_passed_through_coordinate_mapper(self) -> None:
+        hand = _make_hand(index_tip=(0.1, 0.9, 0.0))
+        runtime, *_, mapper, controller = _build_runtime(
+            HandTrackingResult(hands=(hand,)), gesture=Gesture.POINT, action=Action.MOVE_CURSOR
+        )
+
+        runtime.process_frame("frame")
+
+        # Exactly the x, y from landmarks[INDEX_TIP] -- unmodified, and
+        # the z component is not passed at all.
+        expected_x, expected_y, _ = hand.landmarks[HandLandmark.INDEX_TIP]
+        assert mapper.received_points == [(expected_x, expected_y)]
+
+    def test_move_cursor_reaches_computer_controller(self) -> None:
+        hand = _make_hand(index_tip=(0.5, 0.5, 0.0))
         runtime, *_, controller = _build_runtime(
+            HandTrackingResult(hands=(hand,)), gesture=Gesture.POINT, action=Action.MOVE_CURSOR
+        )
+
+        runtime.process_frame("frame")
+
+        assert len(controller.executed_calls) == 1
+        assert controller.executed_calls[0][0] == Action.MOVE_CURSOR
+
+    def test_mapped_screen_coordinates_are_exactly_what_controller_receives(self) -> None:
+        hand = _make_hand(index_tip=(0.3, 0.6, 0.0))
+        mapper = FakeCoordinateMapper(screen_point=ScreenPoint(123, 456))
+        runtime, *_, controller = _build_runtime(
+            HandTrackingResult(hands=(hand,)),
+            gesture=Gesture.POINT,
+            action=Action.MOVE_CURSOR,
+            coordinate_mapper=mapper,
+        )
+
+        runtime.process_frame("frame")
+
+        assert controller.executed_calls == [(Action.MOVE_CURSOR, 123, 456)]
+
+    def test_move_cursor_sets_action_executed_true(self) -> None:
+        hand = _make_hand()
+        runtime, *_ = _build_runtime(
             HandTrackingResult(hands=(hand,)), gesture=Gesture.POINT, action=Action.MOVE_CURSOR
         )
 
@@ -259,8 +372,7 @@ class TestMoveCursorIsNotFabricated:
         assert result.hand_detected is True
         assert result.gesture == Gesture.POINT
         assert result.action == Action.MOVE_CURSOR
-        assert result.action_executed is False
-        assert controller.executed_calls == []
+        assert result.action_executed is True
 
     def test_non_move_cursor_actions_are_executed_normally(self) -> None:
         hand = _make_hand()
@@ -272,6 +384,55 @@ class TestMoveCursorIsNotFabricated:
 
         assert result.action_executed is True
         assert controller.executed_calls == [(Action.SCREENSHOT, None, None)]
+
+    def test_non_move_cursor_actions_do_not_consult_coordinate_mapper(self) -> None:
+        hand = _make_hand()
+        runtime, *_, mapper, controller = _build_runtime(
+            HandTrackingResult(hands=(hand,)), gesture=Gesture.FIST, action=Action.LEFT_CLICK
+        )
+
+        runtime.process_frame("frame")
+
+        assert mapper.received_points == []
+        assert controller.executed_calls == [(Action.LEFT_CLICK, None, None)]
+
+    def test_runtime_does_not_fabricate_coordinates(self) -> None:
+        # The only coordinates that ever reach ComputerController for
+        # MOVE_CURSOR are exactly what CoordinateMapper.map_point()
+        # returned -- the runtime introduces no numbers of its own.
+        hand = _make_hand(index_tip=(0.9, 0.1, 0.0))
+        sentinel_screen_point = ScreenPoint(999, 1)
+        mapper = FakeCoordinateMapper(screen_point=sentinel_screen_point)
+        runtime, *_, controller = _build_runtime(
+            HandTrackingResult(hands=(hand,)),
+            gesture=Gesture.POINT,
+            action=Action.MOVE_CURSOR,
+            coordinate_mapper=mapper,
+        )
+
+        runtime.process_frame("frame")
+
+        assert controller.executed_calls == [
+            (Action.MOVE_CURSOR, sentinel_screen_point.x, sentinel_screen_point.y)
+        ]
+
+    def test_move_cursor_processing_is_deterministic(self) -> None:
+        hand = _make_hand(index_tip=(0.25, 0.75, 0.0))
+        mapper = FakeCoordinateMapper(screen_point=ScreenPoint(200, 300))
+        runtime, *_, controller = _build_runtime(
+            HandTrackingResult(hands=(hand,)),
+            gesture=Gesture.POINT,
+            action=Action.MOVE_CURSOR,
+            coordinate_mapper=mapper,
+        )
+
+        for _ in range(5):
+            result = runtime.process_frame("frame")
+            assert result.action == Action.MOVE_CURSOR
+            assert result.action_executed is True
+
+        assert controller.executed_calls == [(Action.MOVE_CURSOR, 200, 300)] * 5
+        assert mapper.received_points == [(0.25, 0.75)] * 5
 
 
 # ---------------------------------------------------------------------------
@@ -290,10 +451,10 @@ class TestDependencyInjection:
 
     def test_two_runtimes_with_different_fakes_are_independent(self) -> None:
         hand = _make_hand()
-        runtime_a, _, _, _, _, controller_a = _build_runtime(
+        runtime_a, _, _, _, _, _, controller_a = _build_runtime(
             HandTrackingResult(hands=(hand,)), gesture=Gesture.FIST, action=Action.LEFT_CLICK
         )
-        runtime_b, _, _, _, _, controller_b = _build_runtime(
+        runtime_b, _, _, _, _, _, controller_b = _build_runtime(
             HandTrackingResult(), gesture=Gesture.FIST, action=Action.LEFT_CLICK
         )
 
