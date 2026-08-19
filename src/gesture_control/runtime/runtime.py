@@ -12,8 +12,9 @@ order, for one frame:
         -> HandTrackingResult
         -> DetectedHand.landmarks (first hand, if any)
         -> FingerStateDetector.detect(landmarks)
-        -> GestureRecognizer.recognize(finger_states)
+        -> GestureRecognizer.recognize(finger_states, landmarks)
         -> ActionMapper.map(gesture)
+        -> GestureActionGate.should_execute(gesture, action)
         -> [Action.MOVE_CURSOR only] landmarks[HandLandmark.INDEX_TIP]
            -> CoordinateMapper.map_point(x, y) -> ScreenPoint
         -> ComputerController.execute(action, x=..., y=...)
@@ -24,15 +25,32 @@ controller, or coordinate mapper itself. This is what makes it fully
 testable with fakes and free of any real webcam/MediaPipe/OpenCV/
 PyAutoGUI/OS involvement.
 
-The runtime is stateless between frames: `process_frame()` never reads
-or writes any state beyond its injected dependencies, so repeated calls
-are deterministic and independent of call order or history. Gesture
-debouncing, cooldowns, smoothing, and any other cross-frame behavior
-are explicitly out of scope here.
+Landmarks are passed to `GestureRecognizer.recognize()` in addition to
+`FingerStates` so it can distinguish `Gesture.THUMBS_UP` from
+`Gesture.THUMBS_DOWN` using real thumb-direction geometry -- see
+`GestureRecognizer`'s own docstring for why `FingerStates` alone cannot
+do this.
+
+Cross-frame state:
+    Unlike earlier in this project's history, `GestureControlRuntime`
+    is now intentionally *not* fully stateless between frames: it owns
+    a `GestureActionGate` (default-constructed if none is injected,
+    mirroring how `ComputerController` defaults its own backend) that
+    tracks the most recently recognized gesture and a paused flag
+    across calls to `process_frame()`. This is what prevents a held
+    gesture from firing a discrete action (e.g. a click) on every
+    single frame, and what makes `Gesture.OPEN_PALM` -> `Action.PAUSE`
+    a genuine pause/resume toggle rather than a no-op. `GestureRecognizer`
+    and `ActionMapper` themselves remain pure and stateless -- this
+    state lives here, one layer above them, exactly where it belongs.
+    Gesture *smoothing* (filtering noisy per-frame flicker before a
+    gesture is even reported) is a different concern and remains out
+    of scope.
 """
 
 from dataclasses import dataclass
 from typing import Any, Optional
+
 
 from ..actions.action import Action
 from ..actions.mapper import ActionMapper
@@ -42,6 +60,7 @@ from ..gestures.recognizer import Gesture, GestureRecognizer
 from ..mapping.coordinate_mapper import CoordinateMapper
 from ..tracking.hand_tracker_protocol import HandTrackerProtocol
 from ..tracking.hand_tracking_result import DetectedHand, HandTrackingResult
+from .gesture_action_gate import GestureActionGate
 
 
 @dataclass(frozen=True)
@@ -61,10 +80,15 @@ class FrameResult:
 
     `action_executed` distinguishes "an action was mapped" from "the
     controller was actually told to perform it". For the no-hand case
-    it is always `False`; for a detected hand it reflects whether
+    it is always `False`. For a detected hand, it is `False` whenever
+    `GestureActionGate` suppresses dispatch this frame -- because the
+    same discrete gesture is still being held (debounce), because
+    `action` is `Action.PAUSE` (which is absorbed by the gate as a
+    pause/resume toggle and never forwarded), or because the gate is
+    currently paused -- and `True` otherwise, reflecting that
     `ComputerController.execute()` was actually called (see
     `GestureControlRuntime.process_frame` for `Action.MOVE_CURSOR`
-    details).
+    coordinate details).
     """
 
     hand_detected: bool
@@ -78,10 +102,12 @@ class FrameResult:
 class GestureControlRuntime:
     """Orchestrates one frame through hand tracking, gestures, and control.
 
-    All six dependencies are injected; none are constructed here. This
-    lets tests exercise the full frame -> action flow using simple fake
-    objects, with no real webcam, MediaPipe, OpenCV, or PyAutoGUI
-    involved anywhere.
+    All six core dependencies are injected; none are constructed here.
+    This lets tests exercise the full frame -> action flow using simple
+    fake objects, with no real webcam, MediaPipe, OpenCV, or PyAutoGUI
+    involved anywhere. The seventh, `gesture_action_gate`, is optional
+    and defaults to a real `GestureActionGate()` if omitted -- the same
+    pattern `ComputerController` uses for its default `NoOpControlBackend`.
 
     Hand selection is deliberately simple for this milestone: if one or
     more hands are detected, only the first one
@@ -109,6 +135,7 @@ class GestureControlRuntime:
         action_mapper: ActionMapper,
         computer_controller: ComputerController,
         coordinate_mapper: CoordinateMapper,
+        gesture_action_gate: Optional[GestureActionGate] = None,
     ) -> None:
         """Initialize the runtime with its (already-constructed) dependencies.
 
@@ -118,14 +145,18 @@ class GestureControlRuntime:
                 `MediaPipeHandTracker`, or a fake for tests).
             finger_state_detector: Computes per-finger extension state
                 from a detected hand's landmarks.
-            gesture_recognizer: Classifies finger states into a
-                `Gesture`.
+            gesture_recognizer: Classifies finger states (plus
+                landmarks, for THUMBS_UP/THUMBS_DOWN) into a `Gesture`.
             action_mapper: Maps a `Gesture` to an abstract `Action`.
             computer_controller: Executes an `Action` via its injected
                 `ControlBackend`.
             coordinate_mapper: Converts the normalized `INDEX_TIP`
                 landmark into a `ScreenPoint` for `Action.MOVE_CURSOR`.
                 Not consulted for any other action.
+            gesture_action_gate: Decides whether a mapped action should
+                actually be dispatched this frame (debouncing discrete
+                actions, and handling the `Action.PAUSE` toggle). If
+                omitted, defaults to a fresh `GestureActionGate()`.
         """
         self._hand_tracker = hand_tracker
         self._finger_state_detector = finger_state_detector
@@ -133,6 +164,14 @@ class GestureControlRuntime:
         self._action_mapper = action_mapper
         self._computer_controller = computer_controller
         self._coordinate_mapper = coordinate_mapper
+        self._gesture_action_gate = (
+            gesture_action_gate if gesture_action_gate is not None else GestureActionGate()
+        )
+
+    @property
+    def is_paused(self) -> bool:
+        """Whether the runtime's `GestureActionGate` is currently paused."""
+        return self._gesture_action_gate.is_paused
 
     def process_frame(self, frame: Any) -> FrameResult:
         """Run one frame through the full detect -> recognize -> act flow.
@@ -149,8 +188,17 @@ class GestureControlRuntime:
             `ScreenPoint` to `ComputerController.execute()`. No
             coordinates are fabricated: the only numbers used are
             exactly what `DetectedHand.landmarks` and
-            `CoordinateMapper` produce. Every other action is executed
-            with no coordinates, as before.
+            `CoordinateMapper` produce.
+
+        Debouncing and pause (`GestureActionGate`):
+            Before dispatching anything, the mapped `(gesture, action)`
+            pair is passed to `self._gesture_action_gate.should_execute()`.
+            If it returns `False`, `ComputerController.execute()` is
+            not called at all this frame -- this is what stops a held
+            FIST from firing dozens of `LEFT_CLICK`s per second, and
+            what makes `Action.PAUSE` a real pause/resume toggle rather
+            than a no-op (see `GestureActionGate`'s docstring). This
+            check applies to every action, including `Action.MOVE_CURSOR`.
 
         Args:
             frame: A single frame, passed through unchanged to the
@@ -169,6 +217,7 @@ class GestureControlRuntime:
         tracking_result = self._hand_tracker.detect(frame)
 
         if not tracking_result.has_hands:
+            self._gesture_action_gate.should_execute(None, None)
             return FrameResult(
                 hand_detected=False,
                 tracking_result=tracking_result,
@@ -180,10 +229,14 @@ class GestureControlRuntime:
 
         selected_hand = tracking_result.hands[0]
         finger_states = self._finger_state_detector.detect(selected_hand.landmarks)
-        gesture = self._gesture_recognizer.recognize(finger_states)
+        gesture = self._gesture_recognizer.recognize(finger_states, selected_hand.landmarks)
         action = self._action_mapper.map(gesture)
 
-        if action == Action.MOVE_CURSOR:
+        should_dispatch = self._gesture_action_gate.should_execute(gesture, action)
+
+        if not should_dispatch:
+            action_executed = False
+        elif action == Action.MOVE_CURSOR:
             # See the "MOVE_CURSOR handling" note above: INDEX_TIP is
             # the only landmark used, and its coordinates are passed
             # through CoordinateMapper unmodified.

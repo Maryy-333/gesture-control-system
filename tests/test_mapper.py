@@ -36,14 +36,14 @@ class TestGestureToActionMapping:
     def test_point_maps_to_move_cursor(self, mapper: ActionMapper) -> None:
         assert mapper.map(Gesture.POINT) == Action.MOVE_CURSOR
 
-    def test_peace_maps_to_screenshot(self, mapper: ActionMapper) -> None:
-        assert mapper.map(Gesture.PEACE) == Action.SCREENSHOT
+    def test_peace_maps_to_double_click(self, mapper: ActionMapper) -> None:
+        assert mapper.map(Gesture.PEACE) == Action.DOUBLE_CLICK
 
-    def test_thumbs_up_maps_to_none(self, mapper: ActionMapper) -> None:
-        assert mapper.map(Gesture.THUMBS_UP) == Action.NONE
+    def test_thumbs_up_maps_to_right_click(self, mapper: ActionMapper) -> None:
+        assert mapper.map(Gesture.THUMBS_UP) == Action.RIGHT_CLICK
 
-    def test_thumbs_down_maps_to_none(self, mapper: ActionMapper) -> None:
-        assert mapper.map(Gesture.THUMBS_DOWN) == Action.NONE
+    def test_thumbs_down_maps_to_scroll_down(self, mapper: ActionMapper) -> None:
+        assert mapper.map(Gesture.THUMBS_DOWN) == Action.SCROLL_DOWN
 
     def test_unknown_maps_to_none(self, mapper: ActionMapper) -> None:
         assert mapper.map(Gesture.UNKNOWN) == Action.NONE
@@ -59,9 +59,9 @@ class TestFullGestureCoverage:
             Gesture.OPEN_PALM: Action.PAUSE,
             Gesture.FIST: Action.LEFT_CLICK,
             Gesture.POINT: Action.MOVE_CURSOR,
-            Gesture.PEACE: Action.SCREENSHOT,
-            Gesture.THUMBS_UP: Action.NONE,
-            Gesture.THUMBS_DOWN: Action.NONE,
+            Gesture.PEACE: Action.DOUBLE_CLICK,
+            Gesture.THUMBS_UP: Action.RIGHT_CLICK,
+            Gesture.THUMBS_DOWN: Action.SCROLL_DOWN,
             Gesture.UNKNOWN: Action.NONE,
         }
 
@@ -103,9 +103,9 @@ class TestDeterminismAndStatelessness:
     def test_interleaved_calls_across_instances_are_consistent(self) -> None:
         mapper_a = ActionMapper()
         mapper_b = ActionMapper()
-        assert mapper_a.map(Gesture.PEACE) == Action.SCREENSHOT
+        assert mapper_a.map(Gesture.PEACE) == Action.DOUBLE_CLICK
         assert mapper_b.map(Gesture.POINT) == Action.MOVE_CURSOR
-        assert mapper_a.map(Gesture.PEACE) == Action.SCREENSHOT
+        assert mapper_a.map(Gesture.PEACE) == Action.DOUBLE_CLICK
         assert mapper_b.map(Gesture.UNKNOWN) == Action.NONE
 
 

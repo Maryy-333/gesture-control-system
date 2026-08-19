@@ -56,14 +56,22 @@ class FakeFingerStateDetector:
 
 
 class FakeGestureRecognizer:
-    """Fake GestureRecognizer: returns a fixed Gesture, records input."""
+    """Fake GestureRecognizer: returns a fixed Gesture, records input.
+
+    Mirrors the real `GestureRecognizer.recognize()` signature, which
+    accepts an optional `landmarks` argument (used to disambiguate
+    THUMBS_UP from THUMBS_DOWN) in addition to `finger_states`. Both
+    arguments are recorded so tests can assert on either one.
+    """
 
     def __init__(self, gesture: Gesture) -> None:
         self._gesture = gesture
         self.received_finger_states: List[Any] = []
+        self.received_landmarks: List[Any] = []
 
-    def recognize(self, finger_states: Any) -> Gesture:
+    def recognize(self, finger_states: Any, landmarks: Any = None) -> Gesture:
         self.received_finger_states.append(finger_states)
+        self.received_landmarks.append(landmarks)
         return self._gesture
 
 
@@ -471,17 +479,24 @@ class TestDependencyInjection:
 
 class TestDeterminism:
     def test_repeated_processing_of_the_same_frame_is_consistent(self) -> None:
+        # Action.LEFT_CLICK is a discrete action: GestureActionGate
+        # debounces it while the same FIST gesture keeps being held,
+        # so it fires (action_executed=True) exactly once, then is
+        # suppressed (action_executed=False) on every subsequent frame
+        # for as long as the identical gesture/action pair repeats.
+        # This is still deterministic -- the sequence of outcomes is
+        # exactly the same every time this exact sequence of frames is
+        # processed -- just not "execute every frame".
         hand = _make_hand()
         runtime, *_, controller = _build_runtime(
             HandTrackingResult(hands=(hand,)), gesture=Gesture.FIST, action=Action.LEFT_CLICK
         )
 
-        for _ in range(5):
-            result = runtime.process_frame("frame")
-            assert result.action == Action.LEFT_CLICK
-            assert result.action_executed is True
+        results = [runtime.process_frame("frame") for _ in range(5)]
 
-        assert controller.executed_calls == [(Action.LEFT_CLICK, None, None)] * 5
+        assert [result.action for result in results] == [Action.LEFT_CLICK] * 5
+        assert [result.action_executed for result in results] == [True, False, False, False, False]
+        assert controller.executed_calls == [(Action.LEFT_CLICK, None, None)]
 
     def test_repeated_no_hand_frames_are_consistent(self) -> None:
         runtime, *_, controller = _build_runtime(HandTrackingResult())
