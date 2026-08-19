@@ -183,7 +183,7 @@ class TestMaxFrames:
         frames_processed = loop.run()
 
         assert frames_processed == 0
-        assert frame_source.release_calls == 1  # still cleaned up
+        assert frame_source.release_calls == 1
 
 
 # ---------------------------------------------------------------------------
@@ -196,23 +196,35 @@ class TestOnFrameProcessedCallback:
             hand_detected=True,
             tracking_result=HandTrackingResult(),
             selected_hand=None,
-            gesture=Gesture.FIST,
+            gesture=Gesture.THREE_FINGERS,
             action=Action.LEFT_CLICK,
             action_executed=True,
         )
+
         frame_source = FakeFrameSource(["f1", "f2"])
         runtime = FakeRuntime(result=result_a)
         received: List[FrameResult] = []
 
-        loop = WebcamLoop(frame_source, runtime, on_frame_processed=received.append)
+        loop = WebcamLoop(
+            frame_source,
+            runtime,
+            on_frame_processed=received.append,
+        )
+
         loop.run()
 
         assert received == [result_a, result_a]
 
     def test_no_callback_is_fine(self) -> None:
         frame_source = FakeFrameSource(["f1"])
-        loop = WebcamLoop(frame_source, FakeRuntime(), on_frame_processed=None)
+        loop = WebcamLoop(
+            frame_source,
+            FakeRuntime(),
+            on_frame_processed=None,
+        )
+
         frames_processed = loop.run()
+
         assert frames_processed == 1
 
 
@@ -221,40 +233,68 @@ class TestOnFrameProcessedCallback:
 # ---------------------------------------------------------------------------
 
 class TestDisplay:
-    def test_display_false_never_imports_cv2(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Make any attempt to import cv2 fail loudly, then prove the
-        # loop runs fine anyway when display=False.
+    def test_display_false_never_imports_cv2(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         import builtins
 
         real_import = builtins.__import__
 
-        def blocking_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        def blocking_import(
+            name: str,
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
             if name == "cv2":
-                raise ImportError("cv2 must not be imported when display=False")
+                raise ImportError(
+                    "cv2 must not be imported when display=False"
+                )
             return real_import(name, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "__import__", blocking_import)
 
         frame_source = FakeFrameSource(["f1", "f2"])
-        loop = WebcamLoop(frame_source, FakeRuntime(), display=False)
+        loop = WebcamLoop(
+            frame_source,
+            FakeRuntime(),
+            display=False,
+        )
+
         frames_processed = loop.run()
 
         assert frames_processed == 2
 
-    def test_display_true_uses_cv2_imshow_and_waitkey(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_display_true_uses_cv2_imshow_and_waitkey(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         import types
 
         calls: List[Tuple[str, tuple]] = []
 
         fake_cv2 = types.SimpleNamespace(
-            imshow=lambda window, frame: calls.append(("imshow", (window, frame))),
-            waitKey=lambda delay: calls.append(("waitKey", (delay,))) or -1,
-            destroyAllWindows=lambda: calls.append(("destroyAllWindows", ())),
+            imshow=lambda window, frame: calls.append(
+                ("imshow", (window, frame))
+            ),
+            waitKey=lambda delay: calls.append(
+                ("waitKey", (delay,))
+            ) or -1,
+            destroyAllWindows=lambda: calls.append(
+                ("destroyAllWindows", ())
+            ),
         )
+
         monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
 
         frame_source = FakeFrameSource(["f1"])
-        loop = WebcamLoop(frame_source, FakeRuntime(), display=True, window_name="Test Window")
+        loop = WebcamLoop(
+            frame_source,
+            FakeRuntime(),
+            display=True,
+            window_name="Test Window",
+        )
+
         loop.run()
 
         assert ("imshow", ("Test Window", "f1")) in calls
@@ -262,41 +302,56 @@ class TestDisplay:
         assert ("destroyAllWindows", ()) in calls
 
     def test_quit_key_stops_the_loop_before_frame_source_is_exhausted(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         import types
 
-        # waitKey reports the quit key ('q' == 113) was pressed immediately.
         fake_cv2 = types.SimpleNamespace(
             imshow=lambda window, frame: None,
             waitKey=lambda delay: ord("q"),
             destroyAllWindows=lambda: None,
         )
+
         monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
 
         frame_source = FakeFrameSource(["f1", "f2", "f3"])
         runtime = FakeRuntime()
-        loop = WebcamLoop(frame_source, runtime, display=True, quit_key="q")
+
+        loop = WebcamLoop(
+            frame_source,
+            runtime,
+            display=True,
+            quit_key="q",
+        )
 
         frames_processed = loop.run()
 
-        # Stopped after the first frame, not all three.
         assert frames_processed == 1
         assert runtime.processed_frames == ["f1"]
         assert frame_source.release_calls == 1
 
-    def test_non_quit_key_does_not_stop_the_loop(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_non_quit_key_does_not_stop_the_loop(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         import types
 
         fake_cv2 = types.SimpleNamespace(
             imshow=lambda window, frame: None,
-            waitKey=lambda delay: -1,  # no key pressed
+            waitKey=lambda delay: -1,
             destroyAllWindows=lambda: None,
         )
+
         monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
 
         frame_source = FakeFrameSource(["f1", "f2"])
-        loop = WebcamLoop(frame_source, FakeRuntime(), display=True, quit_key="q")
+        loop = WebcamLoop(
+            frame_source,
+            FakeRuntime(),
+            display=True,
+            quit_key="q",
+        )
 
         frames_processed = loop.run()
 
@@ -315,6 +370,7 @@ class TestDeterminism:
             return loop.run()
 
         results = {run_once() for _ in range(5)}
+
         assert results == {3}
 
 
@@ -326,7 +382,9 @@ class TestFrameSourceProtocol:
     def test_fake_frame_source_satisfies_the_protocol(self) -> None:
         assert isinstance(FakeFrameSource([]), FrameSource)
 
-    def test_object_missing_required_methods_does_not_satisfy_protocol(self) -> None:
+    def test_object_missing_required_methods_does_not_satisfy_the_protocol(
+        self,
+    ) -> None:
         class NotAFrameSource:
             pass
 
@@ -338,7 +396,9 @@ class TestFrameSourceProtocol:
 # ---------------------------------------------------------------------------
 
 class TestNoForbiddenTopLevelImports:
-    def test_webcam_loop_module_does_not_import_cv2_mediapipe_pyautogui_at_top_level(self) -> None:
+    def test_webcam_loop_module_does_not_import_cv2_mediapipe_pyautogui_at_top_level(
+        self,
+    ) -> None:
         import gesture_control.app.webcam_loop as webcam_loop_module
 
         with open(webcam_loop_module.__file__) as f:
@@ -346,10 +406,12 @@ class TestNoForbiddenTopLevelImports:
 
         forbidden = {"cv2", "mediapipe", "pyautogui"}
         top_level_imports = set()
-        for node in tree.body:  # only module-level statements, not nested in functions
+
+        for node in tree.body:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     top_level_imports.add(alias.name.split(".")[0])
+
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
                     top_level_imports.add(node.module.split(".")[0])

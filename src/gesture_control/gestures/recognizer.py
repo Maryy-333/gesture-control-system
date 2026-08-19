@@ -37,7 +37,7 @@ class Gesture(str, Enum):
 
     UNKNOWN = "unknown"
     OPEN_PALM = "open_palm"
-    FIST = "fist"
+    THREE_FINGERS = "three_fingers"
     POINT = "point"
     PEACE = "peace"
     THUMBS_UP = "thumbs_up"
@@ -49,10 +49,15 @@ def _is_open_palm(states: FingerStates) -> bool:
     return states.thumb and states.index and states.middle and states.ring and states.pinky
 
 
-def _is_fist(states: FingerStates) -> bool:
-    """All five fingers folded."""
-    return not (states.thumb or states.index or states.middle or states.ring or states.pinky)
-
+def _is_three_fingers(states: FingerStates) -> bool:
+    """Index, middle, and ring extended; thumb and pinky folded."""
+    return (
+        not states.thumb
+        and states.index
+        and states.middle
+        and states.ring
+        and not states.pinky
+    )
 
 def _is_thumb_only_extended(states: FingerStates) -> bool:
     """Only the thumb extended -- the shared pattern for both thumbs-up and thumbs-down.
@@ -87,7 +92,7 @@ def _is_peace(states: FingerStates) -> bool:
 # rather than through a shared scoring or priority system.
 _GESTURE_RULES: List[Tuple[Callable[[FingerStates], bool], Gesture]] = [
     (_is_open_palm, Gesture.OPEN_PALM),
-    (_is_fist, Gesture.FIST),
+    (_is_three_fingers, Gesture.THREE_FINGERS),
     (_is_peace, Gesture.PEACE),
     (_is_point, Gesture.POINT),
 ]

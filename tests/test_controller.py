@@ -57,6 +57,12 @@ class RecordingBackend:
     def pause(self) -> None:
         self.calls.append(("pause", ()))
 
+    def volume_up(self) -> None:
+        self.calls.append(("volume_up", ()))
+
+    def volume_down(self) -> None:
+        self.calls.append(("volume_down", ()))
+
 
 @pytest.fixture
 def backend() -> RecordingBackend:
@@ -158,6 +164,14 @@ class TestZeroArgumentActions:
         controller.execute(Action.SCROLL_DOWN)
         assert backend.calls == [("scroll_down", ())]
 
+    def test_volume_up(self, controller: ComputerController, backend: RecordingBackend) -> None:
+        controller.execute(Action.VOLUME_UP)
+        assert backend.calls == [("volume_up", ())]
+
+    def test_volume_down(self, controller: ComputerController, backend: RecordingBackend) -> None:
+        controller.execute(Action.VOLUME_DOWN)
+        assert backend.calls == [("volume_down", ())]
+
     def test_screenshot(self, controller: ComputerController, backend: RecordingBackend) -> None:
         controller.execute(Action.SCREENSHOT)
         assert backend.calls == [("screenshot", ())]
@@ -245,6 +259,8 @@ class TestDependencyInjection:
         controller.execute(Action.SCROLL_DOWN)
         controller.execute(Action.SCREENSHOT)
         controller.execute(Action.PAUSE)
+        controller.execute(Action.VOLUME_UP)
+        controller.execute(Action.VOLUME_DOWN)
 
     def test_no_op_backend_satisfies_the_control_backend_protocol(self) -> None:
         assert isinstance(NoOpControlBackend(), ControlBackend)

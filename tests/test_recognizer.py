@@ -21,17 +21,29 @@ def recognizer() -> GestureRecognizer:
 
 
 # ---------------------------------------------------------------------------
-# OPEN_PALM / FIST
+# OPEN_PALM / THREE_FINGERS
 # ---------------------------------------------------------------------------
 
-class TestOpenPalmAndFist:
+class TestOpenPalmAndThreeFingers:
     def test_open_palm(self, recognizer: GestureRecognizer) -> None:
-        states = FingerStates(thumb=True, index=True, middle=True, ring=True, pinky=True)
+        states = FingerStates(
+            thumb=True,
+            index=True,
+            middle=True,
+            ring=True,
+            pinky=True,
+        )
         assert recognizer.recognize(states) == Gesture.OPEN_PALM
 
-    def test_fist(self, recognizer: GestureRecognizer) -> None:
-        states = FingerStates(thumb=False, index=False, middle=False, ring=False, pinky=False)
-        assert recognizer.recognize(states) == Gesture.FIST
+    def test_three_fingers(self, recognizer: GestureRecognizer) -> None:
+        states = FingerStates(
+            thumb=False,
+            index=True,
+            middle=True,
+            ring=True,
+            pinky=False,
+        )
+        assert recognizer.recognize(states) == Gesture.THREE_FINGERS
 
 
 # ---------------------------------------------------------------------------
@@ -40,11 +52,23 @@ class TestOpenPalmAndFist:
 
 class TestPoint:
     def test_point_with_thumb_folded(self, recognizer: GestureRecognizer) -> None:
-        states = FingerStates(thumb=False, index=True, middle=False, ring=False, pinky=False)
+        states = FingerStates(
+            thumb=False,
+            index=True,
+            middle=False,
+            ring=False,
+            pinky=False,
+        )
         assert recognizer.recognize(states) == Gesture.POINT
 
     def test_point_with_thumb_extended(self, recognizer: GestureRecognizer) -> None:
-        states = FingerStates(thumb=True, index=True, middle=False, ring=False, pinky=False)
+        states = FingerStates(
+            thumb=True,
+            index=True,
+            middle=False,
+            ring=False,
+            pinky=False,
+        )
         assert recognizer.recognize(states) == Gesture.POINT
 
 
@@ -54,11 +78,23 @@ class TestPoint:
 
 class TestPeace:
     def test_peace_with_thumb_folded(self, recognizer: GestureRecognizer) -> None:
-        states = FingerStates(thumb=False, index=True, middle=True, ring=False, pinky=False)
+        states = FingerStates(
+            thumb=False,
+            index=True,
+            middle=True,
+            ring=False,
+            pinky=False,
+        )
         assert recognizer.recognize(states) == Gesture.PEACE
 
     def test_peace_with_thumb_extended(self, recognizer: GestureRecognizer) -> None:
-        states = FingerStates(thumb=True, index=True, middle=True, ring=False, pinky=False)
+        states = FingerStates(
+            thumb=True,
+            index=True,
+            middle=True,
+            ring=False,
+            pinky=False,
+        )
         assert recognizer.recognize(states) == Gesture.PEACE
 
 
@@ -68,7 +104,13 @@ class TestPeace:
 
 class TestThumbsUp:
     def test_thumbs_up(self, recognizer: GestureRecognizer) -> None:
-        states = FingerStates(thumb=True, index=False, middle=False, ring=False, pinky=False)
+        states = FingerStates(
+            thumb=True,
+            index=False,
+            middle=False,
+            ring=False,
+            pinky=False,
+        )
         assert recognizer.recognize(states) == Gesture.THUMBS_UP
 
 
@@ -86,7 +128,13 @@ class TestThumbsDownLimitation:
         # thumb direction. The recognizer must consistently classify it
         # as THUMBS_UP rather than guessing or fabricating a distinction
         # it cannot actually make from finger-extension booleans alone.
-        states = FingerStates(thumb=True, index=False, middle=False, ring=False, pinky=False)
+        states = FingerStates(
+            thumb=True,
+            index=False,
+            middle=False,
+            ring=False,
+            pinky=False,
+        )
         gesture = recognizer.recognize(states)
         assert gesture == Gesture.THUMBS_UP
         assert gesture != Gesture.THUMBS_DOWN
@@ -103,8 +151,11 @@ class TestThumbsDownLimitation:
                     for ring in (True, False):
                         for pinky in (True, False):
                             states = FingerStates(
-                                thumb=thumb, index=index, middle=middle,
-                                ring=ring, pinky=pinky,
+                                thumb=thumb,
+                                index=index,
+                                middle=middle,
+                                ring=ring,
+                                pinky=pinky,
                             )
                             assert recognizer.recognize(states) != Gesture.THUMBS_DOWN
 
@@ -123,17 +174,47 @@ class TestUnknown:
         "states",
         [
             # Index and ring extended, middle/pinky folded: not a defined pattern.
-            FingerStates(thumb=False, index=True, middle=False, ring=True, pinky=False),
-            # Three long fingers extended, thumb/pinky folded.
-            FingerStates(thumb=False, index=True, middle=True, ring=True, pinky=False),
+            FingerStates(
+                thumb=False,
+                index=True,
+                middle=False,
+                ring=True,
+                pinky=False,
+            ),
             # Only middle finger extended.
-            FingerStates(thumb=False, index=False, middle=True, ring=False, pinky=False),
+            FingerStates(
+                thumb=False,
+                index=False,
+                middle=True,
+                ring=False,
+                pinky=False,
+            ),
             # Only ring finger extended.
-            FingerStates(thumb=False, index=False, middle=False, ring=True, pinky=False),
+            FingerStates(
+                thumb=False,
+                index=False,
+                middle=False,
+                ring=True,
+                pinky=False,
+            ),
             # Only pinky extended.
-            FingerStates(thumb=False, index=False, middle=False, ring=False, pinky=True),
+            FingerStates(
+                thumb=False,
+                index=False,
+                middle=False,
+                ring=False,
+                pinky=True,
+            ),
             # Thumb + index + middle + ring extended, pinky folded.
-            FingerStates(thumb=True, index=True, middle=True, ring=True, pinky=False),
+            # This is intentionally distinct from THREE_FINGERS because
+            # the three-finger gesture requires the thumb to be folded.
+            FingerStates(
+                thumb=True,
+                index=True,
+                middle=True,
+                ring=True,
+                pinky=False,
+            ),
         ],
     )
     def test_unsupported_combinations_return_unknown(
@@ -147,13 +228,27 @@ class TestUnknown:
 # ---------------------------------------------------------------------------
 
 class TestDeterminism:
-    def test_same_input_always_yields_same_output(self, recognizer: GestureRecognizer) -> None:
-        states = FingerStates(thumb=False, index=True, middle=True, ring=False, pinky=False)
+    def test_same_input_always_yields_same_output(
+        self, recognizer: GestureRecognizer
+    ) -> None:
+        states = FingerStates(
+            thumb=False,
+            index=True,
+            middle=True,
+            ring=False,
+            pinky=False,
+        )
         results = {recognizer.recognize(states) for _ in range(50)}
         assert results == {Gesture.PEACE}
 
     def test_multiple_recognizer_instances_agree(self) -> None:
-        states = FingerStates(thumb=True, index=True, middle=True, ring=True, pinky=True)
+        states = FingerStates(
+            thumb=True,
+            index=True,
+            middle=True,
+            ring=True,
+            pinky=True,
+        )
         first = GestureRecognizer()
         second = GestureRecognizer()
         assert first.recognize(states) == second.recognize(states) == Gesture.OPEN_PALM
@@ -170,8 +265,11 @@ class TestDeterminism:
                         for ring in (True, False):
                             for pinky in (True, False):
                                 states = FingerStates(
-                                    thumb=thumb, index=index, middle=middle,
-                                    ring=ring, pinky=pinky,
+                                    thumb=thumb,
+                                    index=index,
+                                    middle=middle,
+                                    ring=ring,
+                                    pinky=pinky,
                                 )
                                 results.append(r.recognize(states))
             return results

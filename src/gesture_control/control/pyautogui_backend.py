@@ -143,3 +143,11 @@ class PyAutoGUIControlBackend:
     def pause(self) -> None:
         """No-op. See the class docstring's "pause() design note"."""
         return None
+
+    def volume_up(self) -> None:
+        """Increase system volume using the Windows volume-up key."""
+        self._pyautogui.press("volumeup")
+
+    def volume_down(self) -> None:
+        """Decrease system volume using the Windows volume-down key."""
+        self._pyautogui.press("volumedown")

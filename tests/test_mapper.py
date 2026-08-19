@@ -30,8 +30,8 @@ class TestGestureToActionMapping:
     def test_open_palm_maps_to_pause(self, mapper: ActionMapper) -> None:
         assert mapper.map(Gesture.OPEN_PALM) == Action.PAUSE
 
-    def test_fist_maps_to_left_click(self, mapper: ActionMapper) -> None:
-        assert mapper.map(Gesture.FIST) == Action.LEFT_CLICK
+    def test_three_fingers_maps_to_left_click(self, mapper: ActionMapper) -> None:
+        assert mapper.map(Gesture.THREE_FINGERS) == Action.LEFT_CLICK
 
     def test_point_maps_to_move_cursor(self, mapper: ActionMapper) -> None:
         assert mapper.map(Gesture.POINT) == Action.MOVE_CURSOR
@@ -39,11 +39,11 @@ class TestGestureToActionMapping:
     def test_peace_maps_to_double_click(self, mapper: ActionMapper) -> None:
         assert mapper.map(Gesture.PEACE) == Action.DOUBLE_CLICK
 
-    def test_thumbs_up_maps_to_right_click(self, mapper: ActionMapper) -> None:
-        assert mapper.map(Gesture.THUMBS_UP) == Action.RIGHT_CLICK
+    def test_thumbs_up_maps_to_volume_up(self, mapper: ActionMapper) -> None:
+        assert mapper.map(Gesture.THUMBS_UP) == Action.VOLUME_UP
 
-    def test_thumbs_down_maps_to_scroll_down(self, mapper: ActionMapper) -> None:
-        assert mapper.map(Gesture.THUMBS_DOWN) == Action.SCROLL_DOWN
+    def test_thumbs_down_maps_to_volume_down(self, mapper: ActionMapper) -> None:
+        assert mapper.map(Gesture.THUMBS_DOWN) == Action.VOLUME_DOWN
 
     def test_unknown_maps_to_none(self, mapper: ActionMapper) -> None:
         assert mapper.map(Gesture.UNKNOWN) == Action.NONE
@@ -57,11 +57,11 @@ class TestFullGestureCoverage:
     def test_every_gesture_has_a_deterministic_mapping(self, mapper: ActionMapper) -> None:
         expected = {
             Gesture.OPEN_PALM: Action.PAUSE,
-            Gesture.FIST: Action.LEFT_CLICK,
+            Gesture.THREE_FINGERS: Action.LEFT_CLICK,
             Gesture.POINT: Action.MOVE_CURSOR,
             Gesture.PEACE: Action.DOUBLE_CLICK,
-            Gesture.THUMBS_UP: Action.RIGHT_CLICK,
-            Gesture.THUMBS_DOWN: Action.SCROLL_DOWN,
+            Gesture.THUMBS_UP: Action.VOLUME_UP,
+            Gesture.THUMBS_DOWN: Action.VOLUME_DOWN,
             Gesture.UNKNOWN: Action.NONE,
         }
 
@@ -85,7 +85,7 @@ class TestFullGestureCoverage:
 
 class TestDeterminismAndStatelessness:
     def test_repeated_mapping_of_same_gesture_is_stable(self, mapper: ActionMapper) -> None:
-        results = {mapper.map(Gesture.FIST) for _ in range(50)}
+        results = {mapper.map(Gesture.THREE_FINGERS) for _ in range(50)}
         assert results == {Action.LEFT_CLICK}
 
     def test_two_mapper_instances_agree(self) -> None:
@@ -96,9 +96,9 @@ class TestDeterminismAndStatelessness:
 
     def test_mapping_one_gesture_does_not_affect_another(self, mapper: ActionMapper) -> None:
         # A stateless mapper must not let one call influence the next.
-        assert mapper.map(Gesture.FIST) == Action.LEFT_CLICK
+        assert mapper.map(Gesture.THREE_FINGERS) == Action.LEFT_CLICK
         assert mapper.map(Gesture.OPEN_PALM) == Action.PAUSE
-        assert mapper.map(Gesture.FIST) == Action.LEFT_CLICK
+        assert mapper.map(Gesture.THREE_FINGERS) == Action.LEFT_CLICK
 
     def test_interleaved_calls_across_instances_are_consistent(self) -> None:
         mapper_a = ActionMapper()

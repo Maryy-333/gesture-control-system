@@ -233,6 +233,7 @@ class GestureControlRuntime:
             finger_states,
             selected_hand.landmarks,
         )
+        print("DEBUG 1 - RAW GESTURE:", raw_gesture)
 
         # IMPORTANT:
         # The gate sees the STABLE gesture, not the noisy raw gesture.
@@ -248,12 +249,20 @@ class GestureControlRuntime:
         # and therefore prevents accidental clicks caused by recognition
         # noise.
         gesture = self._gesture_smoothener.smooth(raw_gesture)
+        print("DEBUG 2 - STABLE GESTURE:", gesture)
 
         action = self._action_mapper.map(gesture)
+        print("DEBUG 3 - ACTION:", action)
 
         should_dispatch = self._gesture_action_gate.should_execute(
             gesture,
             action,
+        )
+        print(
+            "DEBUG 4 - SHOULD DISPATCH:",
+            should_dispatch,
+            "| PAUSED:",
+            self._gesture_action_gate.is_paused,
         )
 
         if not should_dispatch:

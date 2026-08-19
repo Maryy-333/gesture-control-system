@@ -79,6 +79,14 @@ class ControlBackend(Protocol):
         """Pause/suspend automated control."""
         ...
 
+    def volume_up(self) -> None:
+        """Increase system volume."""
+        ...
+    
+    def volume_down(self) -> None:
+        """Decrease system volume."""
+        ...
+
 
 class NoOpControlBackend:
     """A backend that performs no real computer-control behavior.
@@ -115,6 +123,14 @@ class NoOpControlBackend:
     def pause(self) -> None:
         return None
 
+    def volume_up(self) -> None:
+        return None
+
+    def volume_down(self) -> None:
+        return None
+
+   
+
 
 # Maps each zero-argument Action to the ControlBackend method that
 # performs it. Action.NONE and Action.MOVE_CURSOR are handled
@@ -128,6 +144,8 @@ _ZERO_ARGUMENT_ACTIONS: Dict[Action, str] = {
     Action.SCROLL_DOWN: "scroll_down",
     Action.SCREENSHOT: "screenshot",
     Action.PAUSE: "pause",
+    Action.VOLUME_UP: "volume_up",
+    Action.VOLUME_DOWN: "volume_down",
 }
 
 
